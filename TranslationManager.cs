@@ -1,0 +1,159 @@
+using Godot;
+using System.Diagnostics;
+using System.Net.Http;
+
+public partial class TranslationManager : Node //翻译管理器
+{
+	private Process _ocrProcess; //OCR进程
+	private const string OcRServerUrl = "http://127.0.0.1:1224/api/ocr"; //OCR服务器URL
+
+	private HttpRequest hTTPRequest; //HTTP请求节点
+
+    public override void _Ready()
+	{
+        
+		hTTPRequest = GetNode<HttpRequest>("HTTPRequest"); //获取HTTPRequest节点
+
+        if (hTTPRequest == null)
+        {
+            GD.PrintErr("错误：未能在场景中找到 HTTPRequest 节点！");
+        }
+        else
+        {
+            GD.Print("HTTPRequest 节点获取成功。");
+        }
+        
+
+        StartUmiOcrService();
+    }
+
+	public override void _Process(double delta)
+	{
+		if (Input.IsActionJustPressed("capture_for_translate"))
+		{
+			OnCaptureHotkeyPressed();
+        }
+	}
+
+	private void StartUmiOcrService() //启动Umi-OCR服务,做为子进程运行
+    {
+		string umiOcrPath = @"D:\Dev\xiazai\Godot sucai\边狱翻译器\Umi-OCR_Rapid_v2.1.5\Umi-OCR.exe"; //Umi-OCR可执行文件路径
+
+		if (_ocrProcess != null && !_ocrProcess.HasExited)
+		{
+			_ocrProcess.Kill(); //如果进程已存在且未退出，先终止它
+			GD.Print("已终止旧的Umi-OCR进程");
+        }
+
+		_ocrProcess = new Process(); //创建新进程
+		_ocrProcess.StartInfo.FileName = umiOcrPath; //设置可执行文件路径
+		_ocrProcess.StartInfo.Arguments =  "http --port 1224"; //设置脚本路径参数,HTTP服务脚本
+		_ocrProcess.StartInfo.UseShellExecute = false; //不使用外壳执行
+		_ocrProcess.StartInfo.CreateNoWindow = true; //不创建窗口
+		_ocrProcess.Start(); //启动进程
+		GD.Print("Umi-OCR HTTP服务启动");
+
+    }
+
+	private void OnCaptureHotkeyPressed() //捕获热键按下时的处理函数
+    {
+		GD.Print("捕获热键按下，开始截图并发送OCR请求");		
+		
+        //创建获取屏幕截图
+        Image fullScreen = CaptureScreen();
+
+        if (fullScreen == null)
+        {
+            GD.PrintErr("错误：屏幕截图获取失败！");
+            return;
+        }
+
+		//暂时固定裁剪区间(手动调整)
+		int cropX = 100;
+		int cropY = 100;
+		int cropWidth = 800;
+		int cropHeight = 600;
+       
+		Image croppedImage = CaptureRegion(fullScreen, cropX, cropY, cropWidth, cropHeight); //裁剪指定区域
+
+        //转换字节流
+        byte[] bytes = ImageToPngBytes(croppedImage);
+        if (bytes == null || bytes.Length == 0)
+        {
+            GD.PrintErr("错误：图像转换为字节流失败！");
+            return;
+        }
+
+        GD.Print($"图片处理完成，大小: {bytes.Length} 字节");
+        SendToUmiOcr(bytes);//发送OCR请求       
+    }
+
+	private void SendToUmiOcr(byte[] imageData) //发送OCR请求的异步函数
+	{		        
+        //将图片转为Base64，构建JSON请求体
+        string base64Image = System.Convert.ToBase64String(imageData);
+        string jsonBody = $"{{\"base64\": \"{base64Image}\"}}";
+        byte[] bodyBytes = System.Text.Encoding.UTF8.GetBytes(jsonBody);
+
+        //准备请求头 - 使用 JSON 格式
+        string[] headers =
+		{
+            "Content-Type: application/json",
+			$"Content-Length: {bodyBytes.Length}",
+            "Connection: close"
+        };
+
+        //发送POST请求
+        GD.Print($"正在发送请求到 /api/ocr ...");
+        Error requestErr = hTTPRequest.RequestRaw(OcRServerUrl, headers, Godot.HttpClient.Method.Post, bodyBytes);
+
+		if (requestErr != Error.Ok)
+		{
+            GD.PrintErr($"请求发送失败: {requestErr}");
+            return;
+        }              
+    }
+
+    private void OnRequestCompleted(long result, long responseCode, string[] headers, byte[] body) //HTTP请求完成的回调函数
+    {
+        GD.Print($"OCR请求完成，结果代码: {result}, HTTP响应代码: {responseCode}");
+        //请求成功
+        if (responseCode == 200)
+        {
+            string jsonString = System.Text.Encoding.UTF8.GetString(body); //将UTF-8字节数组转换为字符串
+            GD.Print("收到OCR响应: ", jsonString);
+
+            //提取文字,调用API进行翻译
+        }
+    }
+
+    //===辅助函数：捕获屏幕截图===
+    private Image CaptureScreen()
+	{
+		return DisplayServer.ScreenGetImage(); //捕获整个屏幕的图像
+    }
+
+	private Image CaptureRegion(Image fullImage,int x, int y, int w, int h)
+	{
+		Rect2I rect2I = new Rect2I(x, y, w, h); //定义裁剪区域
+        return fullImage.GetRegion(rect2I); //裁剪指定区域的图像
+    }
+
+	private byte[] ImageToPngBytes(Image godotImage)
+	{
+		return godotImage.SavePngToBuffer(); //将Godot图像保存为PNG格式的字节数组
+    }
+	
+	public override void _ExitTree()
+	{
+		//退出时终止OCR进程
+		if (_ocrProcess != null && !_ocrProcess.HasExited)
+		{
+			_ocrProcess.Kill();
+			_ocrProcess = null;
+			GD.Print("已终止Umi-OCR进程");
+		}
+		base._ExitTree(); //调用基类退出处理
+    }
+
+}
