@@ -1,5 +1,6 @@
 using Godot;
 using System;
+using System.Reflection;
 using System.Threading.Tasks;
 
 public partial class OcRwindow : Window //OCR窗口
@@ -32,7 +33,8 @@ public partial class OcRwindow : Window //OCR窗口
 		{
 			GD.Print("未找到 TranslationManager，请确保场景中有该节点");
 		}
-	}
+
+    }
 
 	public override void _Process(double delta)
 	{      

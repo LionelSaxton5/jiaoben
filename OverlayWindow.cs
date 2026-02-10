@@ -1,5 +1,6 @@
 using System;
 using System.Runtime.InteropServices;
+using System.Threading.Tasks;
 
 /// <summary>
 /// Windows API 叠加层窗口 - 用于绘制OCR识别框
@@ -55,6 +56,9 @@ public class OverlayWindow : IDisposable //OCR识别叠加层窗口(最终识别
 
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
     private static extern IntPtr GetModuleHandleW(string lpModuleName);
+
+    [DllImport("user32.dll")]
+    private static extern bool TrackMouseEvent(ref TRACKMOUSEEVENT lpEventTrack);
 
     #endregion
 
@@ -115,6 +119,15 @@ public class OverlayWindow : IDisposable //OCR识别叠加层窗口(最终识别
         public uint bmiColors;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct TRACKMOUSEEVENT
+    {
+        public uint cbSize;
+        public uint dwFlags;
+        public IntPtr hwndTrack;
+        public uint dwHoverTime;
+    }
+
     #endregion
 
     #region 常量
@@ -129,9 +142,15 @@ public class OverlayWindow : IDisposable //OCR识别叠加层窗口(最终识别
     private const byte AC_SRC_ALPHA = 0x01;
 
     private const int SW_SHOW = 5;
+    private const int SW_HIDE = 0;
 
     private const uint WM_NCHITTEST = 0x0084;
+    private const uint WM_MOUSEMOVE = 0x0200;
+    private const uint WM_MOUSELEAVE = 0x02A3;
     private static readonly IntPtr HTCAPTION = new IntPtr(2);
+    private static readonly IntPtr HTCLIENT = new IntPtr(1);
+
+    private const uint TME_LEAVE = 0x00000002;
 
     private const string CLASS_NAME = "OverlayWindowClass";
 
@@ -145,6 +164,11 @@ public class OverlayWindow : IDisposable //OCR识别叠加层窗口(最终识别
     private bool _isDisposed;
     private int _x, _y, _width, _height;
     private uint _borderColor = 0x00FF0000; // BGR: 蓝色
+    private bool _isMouseTracking = false;
+
+    // 事件回调
+    public event Action MouseEntered;
+    public event Action MouseLeft;
 
     public IntPtr Handle => _hWnd;
     public bool IsCreated => _hWnd != IntPtr.Zero;
@@ -231,15 +255,44 @@ public class OverlayWindow : IDisposable //OCR识别叠加层窗口(最终识别
 
     private IntPtr WndProc(IntPtr hWnd, uint uMsg, IntPtr wParam, IntPtr lParam)
     {
-        if (uMsg == WM_NCHITTEST)
+        switch (uMsg)
         {
-            return HTCAPTION; // 整个窗口都可拖动
+            case WM_NCHITTEST:
+                return HTCAPTION; // 整个窗口都可拖动
+
+            case WM_MOUSEMOVE:
+                // 开始跟踪鼠标离开事件
+                if (!_isMouseTracking)
+                {
+                    TRACKMOUSEEVENT tme = new TRACKMOUSEEVENT();
+                    tme.cbSize = (uint)Marshal.SizeOf(typeof(TRACKMOUSEEVENT));
+                    tme.dwFlags = TME_LEAVE;
+                    tme.hwndTrack = hWnd;
+                    tme.dwHoverTime = 0;
+
+                    if (TrackMouseEvent(ref tme))
+                    {
+                        _isMouseTracking = true;
+                    }
+                }
+
+                // 触发鼠标进入事件
+                MouseEntered?.Invoke();
+                return IntPtr.Zero;
+
+            case WM_MOUSELEAVE:
+                _isMouseTracking = false;
+                // 触发鼠标离开事件
+                MouseLeft?.Invoke();
+                return IntPtr.Zero;
         }
+
         return DefWindowProcW(hWnd, uMsg, wParam, lParam);
     }
 
     private void DrawTransparentWindow()
     {
+        // ... 保持不变 ...
         if (_hWnd == IntPtr.Zero) return;
 
         IntPtr screenDC = GetDC(IntPtr.Zero);
@@ -287,6 +340,7 @@ public class OverlayWindow : IDisposable //OCR识别叠加层窗口(最终识别
 
     private void DrawDashedBorder(IntPtr pixels, int width, int height, uint color)
     {
+        // ... 保持不变 ...
         byte b = (byte)(color & 0xFF);
         byte g = (byte)((color >> 8) & 0xFF);
         byte r = (byte)((color >> 16) & 0xFF);
@@ -370,6 +424,12 @@ public class OverlayWindow : IDisposable //OCR识别叠加层窗口(最终识别
     {
         if (_hWnd != IntPtr.Zero)
             ShowWindow(_hWnd, SW_SHOW);
+    }
+
+    public void Hide()
+    {
+        if (_hWnd != IntPtr.Zero)
+            ShowWindow(_hWnd, SW_HIDE);
     }
 
     public void Destroy()
