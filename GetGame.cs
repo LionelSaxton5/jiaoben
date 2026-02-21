@@ -6,6 +6,8 @@ using System.IO;
 using System.Linq;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.Threading.Tasks;
+using static Godot.HttpRequest;
 
 public partial class GetGame : Node //获取边狱巴士游戏路径
 {
@@ -26,6 +28,7 @@ public partial class GetGame : Node //获取边狱巴士游戏路径
 
     private bool isFileOperated = false; //文件是否已操作标志
     private InlineTranslation inlineTranslation; //内嵌式翻译节点引用
+    private SkillFile skillFile; //技能文件节点引用
     private ProgressWindow progressWindow; //进度窗口节点引用
 
     public override void _Ready()
@@ -35,7 +38,7 @@ public partial class GetGame : Node //获取边狱巴士游戏路径
             if (SaveManager.Instance != null && SaveManager.Instance.saveData != null &&
                 !string.IsNullOrWhiteSpace(SaveManager.Instance.saveData.gameExePath))
             {
-                var gameInstallPath = SaveManager.Instance.saveData.gameExePath;                                
+                gameInstallPath = SaveManager.Instance.saveData.gameExePath;                                
             }
         }
         catch (Exception ex)
@@ -68,7 +71,7 @@ public partial class GetGame : Node //获取边狱巴士游戏路径
         }
     }
 
-    public void OnGetMainStorylineOriginalText() //获取主线原文
+    public async Task OnGetMainStorylineOriginalText() //获取主线原文
     {
         OperateFile(); //操作文件
        
@@ -77,16 +80,35 @@ public partial class GetGame : Node //获取边狱巴士游戏路径
             ErrorWindow.ShowError("文件操作未成功，无法获取故事文件");
             return;
         }
+        /*
         List<string> storyFiles = FindStoryFiles(selectedChapter, selectedLevel); //查找故事文件
-
-        List<string> mazeFiles = FindMazePlot(selectedChapter, selectedLevel); //查找迷宫剧情文件
+        List<string> mazeFiles = FindMazePlot(selectedChapter, selectedLevel); //查找迷宫剧情文件        
 
         List<string> allFiles = new List<string>();
         allFiles.AddRange(storyFiles);
         allFiles.AddRange(mazeFiles);
+        */
 
-        inlineTranslation = GetParent() as InlineTranslation; //获取InlineTranslation节点引用
-        inlineTranslation.StartBatchTranslation(allFiles); //加载原文
+        inlineTranslation = GetParent() as InlineTranslation; //获取InlineTranslation节点引用       
+        //inlineTranslation.StartBatchTranslation(allFiles); //加载剧情原文
+
+        skillFile = inlineTranslation.GetNodeOrNull<SkillFile>("SkillFile"); //获取SkillFile节点引用
+        if (skillFile != null)
+        {
+            skillFile.inlineTranslation = inlineTranslation; //将InlineTranslation引用传递给SkillFile
+            
+            //skillFile.FindEnemyPassive(selectedChapter); //查找敌方被动技能文件
+            skillFile.FindEnemySkills(selectedChapter); //查找敌方技能文件
+            //skillFile.FindEnemyBubble(selectedChapter); //查找敌方技能气泡文件
+            //skillFile.FindEnemyPanicInfo(selectedChapter); //查找敌方恐慌信息文件
+            skillFile.FildStageNode(selectedChapter); //查找关卡节点名称文件
+            
+        }
+        else
+        {
+            GD.PrintErr("未找到 SkillFile 节点");
+        }
+
 
         if (progressWindow != null && !progressWindow.IsQueuedForDeletion())
         {
@@ -110,9 +132,11 @@ public partial class GetGame : Node //获取边狱巴士游戏路径
             GetTree().Root.AddChild(progressWindow);
             progressWindow.Show();
         }
+
+        await inlineTranslation.StartProcessingIfNeededAsync(); //等待加入队列的文件处理完成     
     }
 
-    public void OnGetInterludeOriginalText() //获取间章原文
+    public async Task OnGetInterludeOriginalText() //获取间章原文
     {
         OperateFile(); //操作文件
                
@@ -158,6 +182,8 @@ public partial class GetGame : Node //获取边狱巴士游戏路径
             GetTree().Root.AddChild(progressWindow);
             progressWindow.Show();
         }
+
+        await inlineTranslation.StartProcessingIfNeededAsync(); //等待加入队列的文件处理完成 
     }
 
     //章节和关卡值变化处理
@@ -566,7 +592,7 @@ public partial class GetGame : Node //获取边狱巴士游戏路径
         }
 
         return result;
-    }
+    }   
 
     // 递归复制文件夹的辅助方法
     private void CopyDirectoryRecursive(string sourceDir, string destDir) //sourceDir:源目录, destDir:目标目录
@@ -596,18 +622,15 @@ public partial class GetGame : Node //获取边狱巴士游戏路径
         try
         {
             string jsonFilePath = Path.Combine(gameInstallPath, "LimbusCompany_Data", "Lang", "config.json");
-            GD.Print($"配置文件路径: {jsonFilePath}");
 
             if (File.Exists(jsonFilePath)) //如果文件存在
             {
                 // 读取现有内容
                 string jsonContent = File.ReadAllText(jsonFilePath);
-                GD.Print($"当前配置内容: {jsonContent}");
 
                 var config = JsonSerializer.Deserialize<Dictionary<string, object>>(jsonContent); //反序列化为字典
                 if (config != null && config.TryGetValue("lang", out var langValue) && langValue is string langStr && langStr == "Jp_zh-cn")
                 {
-                    GD.Print("配置文件中的 lang 已经是 'Jp_zh-cn'，无需更新");
                     return; // 跳过更新
                 }
 
@@ -620,7 +643,6 @@ public partial class GetGame : Node //获取边狱巴士游戏路径
                     padding = 5
                 });
                 File.WriteAllText(jsonFilePath, newJson);
-                GD.Print("配置文件已更新");
             }
             else
             {
@@ -634,7 +656,6 @@ public partial class GetGame : Node //获取边狱巴士游戏路径
                     padding = 5
                 });
                 File.WriteAllText(jsonFilePath, newJson);
-                GD.Print("配置文件已创建");
             }
         }
         catch (Exception ex)
@@ -703,7 +724,6 @@ public partial class GetGame : Node //获取边狱巴士游戏路径
 
             // 复制源文件到目标（保留原名 JP_）
             File.Copy(sourceFile, targetJpFileToCopy, false); // false = 不覆盖
-            GD.Print($"新增 JP_ 文件: {relativePath}");
         }
     }
 }

@@ -19,18 +19,21 @@ public partial class ButtonManagement : VBoxContainer //按钮管理容器
 	private SpinBox chapterSpinBox;
 	private SpinBox levelSpinBox;
 	private Button starButton; //主线汉化启动按钮
+	private CheckButton skillsEnemyCheckButton; //主线敌人技能汉化启用按钮
 
-	//汉化间章按钮
-	private SpinBox interludeChapterSpinBox;
+    //汉化间章按钮
+    private SpinBox interludeChapterSpinBox;
 	private SpinBox interludeLevelSpinBox;
 	private Button interludeStarButton; //间章汉化启动按钮
 
 	//翻译源设置相关
 	private Button microsoftButton; //微软设置按钮
 	private Button baiduButton; //百度设置按钮
+	private Button tengxunButton; //腾讯设置按钮
 
-	private CheckButton microsoftCheckButton; //微软翻译源启用按钮
+    private CheckButton microsoftCheckButton; //微软翻译源启用按钮
 	private CheckButton baiduCheckButton; //百度启用按钮
+	private CheckButton tengxunCheckButton; //腾讯启用按钮
 
     private GetGame getGame; //获取游戏节点
 
@@ -42,11 +45,14 @@ public partial class ButtonManagement : VBoxContainer //按钮管理容器
     //OCR启动按钮
 	private CheckButton umiOcrCheckButton; //Umi-OCR启用按钮
 	private LineEdit umiOcrPortLineEdit; //Umi-OCR路径输入框
-
 	private CheckButton paddOcrCheckButton; //Paddle-OCR启用按钮
 
-	//游戏路径
-	private LineEdit gamePathLineEdit; //游戏路径输入框
+	//音乐按钮
+	private AudioStreamPlayer audioStreamPlayer; //音乐播放器
+	private TextureButton musicToggleButton; //音乐开关按钮
+
+    //游戏路径
+    private LineEdit gamePathLineEdit; //游戏路径输入框
 
     public override void _Ready()
 	{
@@ -64,22 +70,31 @@ public partial class ButtonManagement : VBoxContainer //按钮管理容器
 		chapterSpinBox = GetNode<SpinBox>("EmbeddedButton/EmbeddedPanel/ChapterSpinBox");
 		levelSpinBox = GetNode<SpinBox>("EmbeddedButton/EmbeddedPanel/LevelSpinBox");
 		starButton = GetNode<Button>("EmbeddedButton/EmbeddedPanel/StarButton");
+		skillsEnemyCheckButton = GetNode<CheckButton>("EmbeddedButton/EmbeddedPanel/SkillsEnemyCheckButton");
 
-		interludeChapterSpinBox = GetNode<SpinBox>("EmbeddedButton/EmbeddedPanel/InterludeChapterSpinBox");
+        interludeChapterSpinBox = GetNode<SpinBox>("EmbeddedButton/EmbeddedPanel/InterludeChapterSpinBox");
 		interludeLevelSpinBox = GetNode<SpinBox>("EmbeddedButton/EmbeddedPanel/InterludeLevelSpinBox");
 		interludeStarButton = GetNode<Button>("EmbeddedButton/EmbeddedPanel/InterludeStarButton");
 
 		microsoftButton = GetNode<Button>("WarehouseButton/WarehousePanel/MicrosoftButton");
 		baiduButton = GetNode<Button>("WarehouseButton/WarehousePanel/BaiduButton");
+		tengxunButton = GetNode<Button>("WarehouseButton/WarehousePanel/TengxunButton");
+
+        //翻译启动按钮
         microsoftCheckButton = GetNode<CheckButton>("WarehouseButton/WarehousePanel/MicrosoftButton/MicrosoftCheckButton");
 		baiduCheckButton = GetNode<CheckButton>("WarehouseButton/WarehousePanel/BaiduButton/BaiduCheckButton");
+		tengxunCheckButton = GetNode<CheckButton>("WarehouseButton/WarehousePanel/TengxunButton/TengxunCheckButton");
 
-		umiOcrCheckButton = GetNode<CheckButton>("OCRButton/OCRPanel/UmiOcrPortLineEdit/UmiOcrCheckButton");
+        //OCR相关节点
+        umiOcrCheckButton = GetNode<CheckButton>("OCRButton/OCRPanel/UmiOcrPortLineEdit/UmiOcrCheckButton");
 		umiOcrPortLineEdit = GetNode<LineEdit>("OCRButton/OCRPanel/UmiOcrPortLineEdit");
-
 		paddOcrCheckButton = GetNode<CheckButton>("OCRButton/OCRPanel/PaddOcrCheckButton");
 
-		gamePathLineEdit = GetNode<LineEdit>("EmbeddedButton/EmbeddedPanel/GameLineEdit");
+        //音乐相关节点
+        audioStreamPlayer = GetNode<AudioStreamPlayer>("EmbeddedButton/EmbeddedPanel/AudioStreamPlayer");
+		musicToggleButton = GetNode<TextureButton>("EmbeddedButton/EmbeddedPanel/MusicToggleButton");
+
+        gamePathLineEdit = GetNode<LineEdit>("EmbeddedButton/EmbeddedPanel/GameLineEdit");
 
         var inlineScene = GD.Load<PackedScene>("res://changjing/InlineTranslation.tscn").Instantiate();
 		if (inlineScene == null)
@@ -104,8 +119,10 @@ public partial class ButtonManagement : VBoxContainer //按钮管理容器
 
         microsoftCheckButton.ButtonPressed = SaveManager.Instance.saveData.isMicrosofttranslationEnable; //设置微软翻译源启用状态
 		baiduCheckButton.ButtonPressed = SaveManager.Instance.saveData.isBaidutranslationEnable; //设置百度翻译源启用状态
+		tengxunCheckButton.ButtonPressed = SaveManager.Instance.saveData.isTengxuntranslationEnable; //设置腾讯翻译源启用状态
+		skillsEnemyCheckButton.ButtonPressed = SaveManager.Instance.saveData.isSkillsEnemy; //设置主线敌人技能汉化启用状态
 
-		umiOcrCheckButton.ButtonPressed = SaveManager.Instance.saveData.isUmiOcrEnable; //设置Umi-OCR启用状态
+        umiOcrCheckButton.ButtonPressed = SaveManager.Instance.saveData.isUmiOcrEnable; //设置Umi-OCR启用状态
 		paddOcrCheckButton.ButtonPressed = SaveManager.Instance.saveData.isPaddleOcrEnable; //设置Paddle-OCR启用状态
 
         startPanel.Visible = true;
@@ -228,18 +245,64 @@ public partial class ButtonManagement : VBoxContainer //按钮管理容器
         AddChild(apiSettingsWindow);
 		apiSettingsWindow.Show();		
     }
-	private void OnBaiduPortLineEditTextChanged(string newText) //端口输入框文本变化事件
+	
+
+    private void OnBaiduPortLineEditTextChanged(string newText) //百度端口输入框文本变化事件
 	{
 		SaveManager.Instance.saveData.BaidutranslationUrl = newText; //更新保存数据中的端口
         SaveManager.Instance.SaveDataToFile();
     }
-	private void OnBaiduKeyLineEditTextChanged(string newText) //密钥输入框文本变化事件
+	private void OnBaiduKeyLineEditTextChanged(string newText) //百度密钥输入框文本变化事件
 	{
 		SaveManager.Instance.saveData.BaidutranslationKey = newText; //更新保存数据中的密钥
         SaveManager.Instance.SaveDataToFile();
     }
 
-	private void OnUmiOcrCheckButtonPressed(bool pressed) //Umi-OCR启用按钮切换事件
+    private void OnTengxunButtonPressed() //腾讯设置按钮按下事件
+    {
+        apiSettingsWindow = GD.Load<PackedScene>("res://changjing/APISettingsWindow.tscn").Instantiate<Window>();
+        portLineEdit = apiSettingsWindow.GetNode<LineEdit>("Control/PortLineEdit");
+        keyLineEdit = apiSettingsWindow.GetNode<LineEdit>("Control/KeyLineEdit");
+
+        apiSettingsWindow.Title = "腾讯翻译API设置";
+        if (portLineEdit != null)
+            portLineEdit.TextChanged += OnTengxunPortLineEditTextChanged; //连接端口输入框文本变化事件
+        if (keyLineEdit != null)
+            keyLineEdit.TextChanged += OnTengxunKeyLineEditTextChanged; //连接密钥输入框文本变化事件
+
+        apiSettingsWindow.CloseRequested += () =>
+        {
+            if (portLineEdit != null)
+                portLineEdit.TextChanged -= OnTengxunPortLineEditTextChanged;
+            if (keyLineEdit != null)
+                keyLineEdit.TextChanged -= OnTengxunKeyLineEditTextChanged;
+
+            // 防止重复释放和悬空引用
+            if (apiSettingsWindow != null && apiSettingsWindow.IsInsideTree())
+                apiSettingsWindow.QueueFree();
+            apiSettingsWindow = null;
+        };
+
+		portLineEdit.Text = SaveManager.Instance.saveData.TengxuntranslationUrl; //设置端口输入框初始文本
+		keyLineEdit.Text = SaveManager.Instance.saveData.TengxuntranslationKey; //设置密钥输入框初始文本
+
+		AddChild(apiSettingsWindow);
+		apiSettingsWindow.Show();
+    }
+
+	private void OnTengxunPortLineEditTextChanged(string newText) //腾讯端口输入框文本变化事件
+	{
+		SaveManager.Instance.saveData.TengxuntranslationUrl = newText; //更新保存数据中的端口
+		SaveManager.Instance.SaveDataToFile();
+    }
+	private void OnTengxunKeyLineEditTextChanged(string newText) //腾讯密钥输入框文本变化事件
+	{
+		SaveManager.Instance.saveData.TengxuntranslationKey = newText; //更新保存数据中的密钥
+		SaveManager.Instance.SaveDataToFile();
+    }
+
+
+    private void OnUmiOcrCheckButtonPressed(bool pressed) //Umi-OCR启用按钮切换事件
 	{
 		SaveManager.Instance.saveData.isUmiOcrEnable = pressed; //更新保存数据中的Umi-OCR启用状态
 		SaveManager.Instance.SaveDataToFile();
@@ -261,6 +324,24 @@ public partial class ButtonManagement : VBoxContainer //按钮管理容器
 	{
 		SaveManager.Instance.saveData.gameExePath = text; //更新保存数据中的游戏路径
 		SaveManager.Instance.SaveDataToFile();
+    }
+
+	private void OnSkillsEnemyCheckButtonPressed(bool pressed) //主线敌人技能汉化启用按钮切换事件
+	{
+		SaveManager.Instance.saveData.isSkillsEnemy = pressed; //更新保存数据中的主线敌人技能汉化启用状态
+		SaveManager.Instance.SaveDataToFile();
+    }
+
+	private void OnMusicToggleButtonToggled(bool toggle)
+	{
+		if (toggle)
+		{
+			audioStreamPlayer.Play(); //播放音乐
+		}
+		else
+		{
+			audioStreamPlayer.Stop(); //停止音乐
+        }
     }
 
 }

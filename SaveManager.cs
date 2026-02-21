@@ -25,8 +25,10 @@ public partial class SaveManager : Node
 		public string paddleOcrKeysPath { get; set; } = ""; //paddle-OCR字符集路径
         public bool isPaddleOcrEnable { get; set; } = false; //是否启用paddle-OCR
         public string gameExePath { get; set; } = ""; //游戏可执行文件路径
+		public bool isSkillsEnemy { get; set; } = false; //是否开启技能敌人汉化
 
-		public string MicrosofttranslationKey { get; set; } = ""; //微软翻译API密钥
+
+        public string MicrosofttranslationKey { get; set; } = ""; //微软翻译API密钥
 		public string MicrosoftranslationUrl { get; set; } = ""; //微软翻译API端点
 		public bool isMicrosofttranslationEnable { get; set; } = false; //微软翻译是否启用
 
@@ -37,6 +39,8 @@ public partial class SaveManager : Node
 		public string TengxuntranslationKey { get; set; } = ""; //腾讯翻译API密钥
 		public string TengxuntranslationUrl { get; set; } = ""; //腾讯翻译API端点
 		public bool isTengxuntranslationEnable { get; set; } = false; //腾讯翻译是否启用
+
+		public Dictionary<string, string> _persistentCache { get; set; } //持久化缓存，翻译结果会保存在这里面以便下次使用
     }
 
 	public SaveData saveData = new SaveData();

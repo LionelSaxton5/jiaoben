@@ -1,8 +1,11 @@
 using Godot;
-using System.Collections.Generic;
 using System;
+using System.Collections.Generic;
+using System.Reflection.PortableExecutable;
 using System.Security.Cryptography;
 using System.Text;
+using static Godot.HttpRequest;
+using static System.Net.Mime.MediaTypeNames;
 
 
 public partial class TranslationSource : Node //翻译源
@@ -25,11 +28,6 @@ public partial class TranslationSource : Node //翻译源
     private static TranslationSource _instance; //单例实例
     public static TranslationSource Instance => _instance;
 
-    //原文、译文、用户自定义数据(InlineTranslation中的TranslationTask任务)回调委托
-    public delegate void TranslationCallback(string originalText, string translatedText, object userData); //翻译回调委托
-
-    private Dictionary<HttpRequest, (string original, TranslationCallback callback, object userData)> _pendingCallbacks = new();
-
     public override void _Ready()
 	{
         _instance = this;
@@ -40,7 +38,6 @@ public partial class TranslationSource : Node //翻译源
         region = "eastasia"; //默认区域东亚
     }
 	
-
     public void OnFromLangOptionButtonItemEelected(int index)
     {
         switch (index)
@@ -159,37 +156,6 @@ public partial class TranslationSource : Node //翻译源
         }
     }
 
-    //方法重载，带回调参数(内嵌翻译使用)
-    public void SendTranslateRequest(string text, string fromLang, string toLang, TranslationCallback onCompleted, object userData = null)
-    {
-        string url = $"{SaveManager.Instance.saveData.MicrosoftranslationUrl}translate?api-version=3.0&from={fromLang}&to={toLang}";
-
-        //构建JSON请求体: [{"Text": "要翻译的文本"}]
-        string escapedText = EscapeJson(text); //转义特殊字符
-        string jsonBody = $"[{{\"Text\": \"{escapedText}\"}}]"; //微软要求数组格式
-        byte[] bodyBytes = System.Text.Encoding.UTF8.GetBytes(jsonBody); //将JSON变成UTF-8字节数组
-
-        //准备请求头
-        string[] headers =
-        {
-            "Content-Type: application/json",
-            $"Ocp-Apim-Subscription-Key: {SaveManager.Instance.saveData.MicrosofttranslationKey}", //翻译密钥
-            $"Ocp-Apim-Subscription-Region: {region}"
-        };
-
-        //发送POST请求
-        Error error = translateHTTPRequest.RequestRaw(url, headers, HttpClient.Method.Post, bodyBytes);
-
-        if (error != Error.Ok)
-        {
-            ErrorWindow.ShowError($"翻译请求发送失败: {error}");
-            return;
-        }
-
-        // 存储回调信息
-        _pendingCallbacks[translateHTTPRequest] = (text, onCompleted, userData);
-    }
-
     private void BaidutranslateRequest(string text, string fromLang, string toLang) //百度翻译请求(OCR)
     {
         string baiduFromLang = MapToBaiduLangCode(fromLang);
@@ -217,39 +183,6 @@ public partial class TranslationSource : Node //翻译源
         {
             ErrorWindow.ShowError($"百度翻译请求发送失败: {err}");
         }
-    }
-
-    //方法重载，带回调参数(内嵌翻译使用)
-    public void BaidutranslateRequest(string text, string fromLang, string toLang, TranslationCallback onCompleted, object userData = null)
-    {
-        string baiduFromLang = MapToBaiduLangCode(fromLang);
-        string baiduToLang = MapToBaiduLangCode(toLang);
-
-        string apiUrl = "https://fanyi-api.baidu.com/api/trans/vip/translate";
-        string appId = SaveManager.Instance.saveData.BaidutranslationUrl; //百度翻译应用ID
-        string appKey = SaveManager.Instance.saveData.BaidutranslationKey; //百度翻译密钥
-
-        string salt = new Random().Next(100000, 999999).ToString(); //随机盐值
-        string signSource = appId + text + salt + appKey;
-        string sign = ComputeMD5HexLower(signSource);
-
-        string form = $"q={Uri.EscapeDataString(text)}&from={Uri.EscapeDataString(baiduFromLang)}&to={Uri.EscapeDataString(baiduToLang)}&appid={Uri.EscapeDataString(appId)}&salt={Uri.EscapeDataString(salt)}&sign={Uri.EscapeDataString(sign)}";
-        byte[] bodyBytes = Encoding.UTF8.GetBytes(form);
-
-        string[] headers =
-        {
-            "Content-Type: application/x-www-form-urlencoded",
-            $"Content-Length: {bodyBytes.Length}"
-        };
-
-        Error err = baiduHTTPRequest.RequestRaw(apiUrl, headers, HttpClient.Method.Post, bodyBytes);
-        if (err != Error.Ok)
-        {
-            GD.PrintErr($"百度翻译请求发送失败: {err}");
-        }
-
-        // 存储回调信息
-        _pendingCallbacks[baiduHTTPRequest] = (text, onCompleted, userData);
     }
 
     private void TengxuntranslateRequest(string text, string fromLang, string toLang) //腾讯翻译请求(OCR)
@@ -300,58 +233,6 @@ public partial class TranslationSource : Node //翻译源
             GD.PrintErr($"腾讯翻译请求发送失败: {err}");
             return;
         }
-    }
-
-    public void TengxuntranslateRequest(string text, string fromLang, string toLang, TranslationCallback onCompleted, object userData = null) //腾讯翻译请求(内嵌翻译使用)
-    {
-        string tengxunFromLang = MapTOTengxuLangCode(fromLang);
-        string tengxunToLang = MapTOTengxuLangCode(toLang);
-
-        string secretId = SaveManager.Instance.saveData.TengxuntranslationUrl;
-        string secretKey = SaveManager.Instance.saveData.TengxuntranslationKey;
-        string region = "ap-guangzhou"; //腾讯云翻译服务所在区域，固定为广州
-
-        var requestParams = new Godot.Collections.Dictionary<string, Variant> //构建请求参数
-        {
-            { "SourceText", text },
-            { "Source", tengxunFromLang },
-            { "Target", tengxunToLang },
-            { "ProjectId", 0 }
-        };
-        string service = "tmt"; //腾讯云翻译服务标识
-        string host = "tmt.tencentcloudapi.com"; // 就近接入域名
-        string action = "TextTranslate"; //接口名称
-        string version = "2018-03-21"; //接口版本
-        string timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString(); //当前时间戳
-
-        string authorization = GenerateTC3Signature(
-        secretId, secretKey, timestamp, service, host, region, action, version, requestParams);
-
-        string url = $"https://{host}/";
-        string[] headers = new string[]
-        {
-            "Content-Type: application/json; charset=utf-8",
-            "Host: " + host,
-            "X-TC-Action: " + action,
-            "X-TC-Version: " + version,
-            "X-TC-Timestamp: " + timestamp,
-            "X-TC-Region: " + region, // 固定 Region
-            "Authorization: " + authorization
-        };
-
-        string jsonBody = Json.Stringify(requestParams);
-        byte[] bodyBytes = Encoding.UTF8.GetBytes(jsonBody);
-
-        Error err = tengxunHTTPRequest.RequestRaw(url, headers, HttpClient.Method.Post, bodyBytes);
-
-        if (err != Error.Ok)
-        {
-            GD.PrintErr($"腾讯翻译请求发送失败: {err}");
-            return;
-        }
-
-        // 存储回调信息
-        _pendingCallbacks[tengxunHTTPRequest] = (text, onCompleted, userData);
     }
 
     private static string ComputeMD5HexLower(string input) //计算MD5哈希值并返回小写十六进制字符串
@@ -434,180 +315,89 @@ public partial class TranslationSource : Node //翻译源
     }
 
 
-
     //微软翻译请求完成的回调函数
     private void OnTranslateCompleted(long result, long responseCode, string[] headers, byte[] body)
     {
-        GD.Print($"翻译请求完成，响应代码：{responseCode}");
+        //GD.Print($"翻译请求完成，响应代码：{responseCode}");
 
-        // 检查是否有对应的回调信息
-        if (_pendingCallbacks.TryGetValue(translateHTTPRequest, out var info))
-        {
-            _pendingCallbacks.Remove(translateHTTPRequest); // 移除已处理的回调信息
-            string translatedText = "";
+       if (responseCode == 200)
+       {
+            string jsonString = System.Text.Encoding.UTF8.GetString(body); //将UTF-8字节数组转换为JSON字符串
 
-            if (responseCode == 200)
+            //解析JSON响应
+            var jsonArray = Json.ParseString(jsonString).AsGodotArray(); //解析JSON字符串为Godot数组
+            if (jsonArray.Count > 0)
             {
-                string jsonString = System.Text.Encoding.UTF8.GetString(body); //将UTF-8字节数组转换为JSON字符串
+               var firstResult = jsonArray[0].AsGodotDictionary(); //获取第一个结果的字典
+               var translations = firstResult["translations"].AsGodotArray(); //获取翻译数组
 
-                //解析JSON响应
-                var jsonArray = Json.ParseString(jsonString).AsGodotArray(); //解析JSON字符串为Godot数组
-                if (jsonArray.Count > 0)
-                {
-                    var firstResult = jsonArray[0].AsGodotDictionary(); //获取第一个结果的字典
-                    var translations = firstResult["translations"].AsGodotArray(); //获取翻译数组
-
-                    if (translations.Count > 0)
-                    {
-                        var translation = translations[0].AsGodotDictionary(); //获取第一个翻译的字典
-                        translatedText = translation["text"].ToString(); //获取翻译文本
-                    }
-                }
+               if (translations.Count > 0)
+               {
+                   var translation = translations[0].AsGodotDictionary(); //获取第一个翻译的字典
+                   string translatedText = translation["text"].ToString(); //获取翻译文本
+                   ShowTranslationResult(translatedText);
+               }
             }
-            else
-            {
-                GD.PrintErr($"翻译失败: {responseCode}");
-            }
-
-            info.callback?.Invoke(info.original, translatedText, info.userData); //调用回调函数
-        }
-        else
-        {
-            if (responseCode == 200)
-            {
-                string jsonString = System.Text.Encoding.UTF8.GetString(body); //将UTF-8字节数组转换为JSON字符串
-
-                //解析JSON响应
-                var jsonArray = Json.ParseString(jsonString).AsGodotArray(); //解析JSON字符串为Godot数组
-                if (jsonArray.Count > 0)
-                {
-                    var firstResult = jsonArray[0].AsGodotDictionary(); //获取第一个结果的字典
-                    var translations = firstResult["translations"].AsGodotArray(); //获取翻译数组
-
-                    if (translations.Count > 0)
-                    {
-                        var translation = translations[0].AsGodotDictionary(); //获取第一个翻译的字典
-                        string translatedText = translation["text"].ToString(); //获取翻译文本
-                        ShowTranslationResult(translatedText);
-                    }
-                }
-            }
-        }
+       }
+        
     }
 
     private void OnBaiduTranslateCompleted(long result, long responseCode, string[] headers, byte[] body) //百度翻译请求完成回调
     {
-        GD.Print($"百度翻译请求完成，响应代码：{responseCode}");
+        //GD.Print($"百度翻译请求完成，响应代码：{responseCode}");
 
-        if (_pendingCallbacks.TryGetValue(baiduHTTPRequest, out var info))
-        {
-            _pendingCallbacks.Remove(baiduHTTPRequest); // 移除已处理的回调信息
-            string translatedText = "";
-
-            if (responseCode == 200)
+        if (responseCode == 200)
             {
-                string jsonString = Encoding.UTF8.GetString(body);
+            string jsonString = Encoding.UTF8.GetString(body);
 
                 var json = Json.ParseString(jsonString).AsGodotDictionary(); //解析JSON字符串为Godot字典
-                if (json.ContainsKey("trans_result"))
+            if (json.ContainsKey("trans_result"))
                 {
-                    var transArray = json["trans_result"].AsGodotArray();
-                    var sb = new StringBuilder();
-                    foreach (var item in transArray)
-                    {
-                        sb.Append(item.AsGodotDictionary()["dst"].ToString());
-                    }
-                    translatedText = sb.ToString();
+                var transArray = json["trans_result"].AsGodotArray();
+                var translatedTextBuilder = new StringBuilder();
+                foreach (var item in transArray)
+                {
+                     var dict = item.AsGodotDictionary();
+                     translatedTextBuilder.Append(dict["dst"].ToString());                       
                 }
+                string translatedText = translatedTextBuilder.ToString();
+
+                ShowTranslationResult(translatedText);
             }
-            else
-            {
-                string errorBody = Encoding.UTF8.GetString(body);
-                GD.PrintErr($"百度翻译请求失败，状态码 {responseCode}: {errorBody}");
-            }
-            info.callback?.Invoke(info.original, translatedText, info.userData); //调用回调函数，译文为空
         }
         else
-        {
-
-            if (responseCode == 200)
-            {
-                string jsonString = Encoding.UTF8.GetString(body);
-
-                var json = Json.ParseString(jsonString).AsGodotDictionary(); //解析JSON字符串为Godot字典
-                if (json.ContainsKey("trans_result"))
-                {
-                    var transArray = json["trans_result"].AsGodotArray();
-                    var translatedTextBuilder = new StringBuilder();
-                    foreach (var item in transArray)
-                    {
-                        var dict = item.AsGodotDictionary();
-                        translatedTextBuilder.Append(dict["dst"].ToString());                       
-                    }
-                    string translatedText = translatedTextBuilder.ToString();
-
-                    ShowTranslationResult(translatedText);
-                }
-            }
-            else
-            {
-                string errorBody = Encoding.UTF8.GetString(body);
-                GD.PrintErr($"百度翻译请求失败，状态码 {responseCode}: {errorBody}");
-            }
+        { 
+            string errorBody = Encoding.UTF8.GetString(body);
+            GD.PrintErr($"百度翻译请求失败，状态码 {responseCode}: {errorBody}");
         }
+        
     }
 
     private void OnTengxunTranslateCompleted(long result, long responseCode, string[] headers, byte[] body) //腾讯翻译请求完成回调
     {
-        GD.Print($"腾讯翻译请求完成，响应代码：{responseCode}");
-        if (_pendingCallbacks.TryGetValue(tengxunHTTPRequest, out var info))
+        //GD.Print($"腾讯翻译请求完成，响应代码：{responseCode}");
+        
+        if (responseCode == 200)
         {
-            _pendingCallbacks.Remove(tengxunHTTPRequest); // 移除已处理的回调信息
-            string translatedText = "";
-            if (responseCode == 200)
+            string jsonString = Encoding.UTF8.GetString(body);
+            var json = Json.ParseString(jsonString).AsGodotDictionary(); //解析JSON字符串为Godot字典
+            if (json.ContainsKey("Response"))
             {
-                string jsonString = Encoding.UTF8.GetString(body);
-                var json = Json.ParseString(jsonString).AsGodotDictionary(); //解析JSON字符串为Godot字典
-                if (json.ContainsKey("Response"))
+                var responseDict = json["Response"].AsGodotDictionary();
+                if (responseDict.ContainsKey("TargetText"))
                 {
-                    var responseDict = json["Response"].AsGodotDictionary();
-                    if (responseDict.ContainsKey("TargetText"))
-                    {
-                        translatedText = responseDict["TargetText"].ToString();
-                    }
+                    string translatedText = responseDict["TargetText"].ToString();
+                    ShowTranslationResult(translatedText);
                 }
             }
-            else
-            {
-                string errorBody = Encoding.UTF8.GetString(body);
-                GD.PrintErr($"腾讯翻译请求失败，状态码 {responseCode}: {errorBody}");
-            }
-            info.callback?.Invoke(info.original, translatedText, info.userData); //调用回调函数，译文为空
         }
-        else
-        {
-            if (responseCode == 200)
-            {
-                string jsonString = Encoding.UTF8.GetString(body);
-                var json = Json.ParseString(jsonString).AsGodotDictionary(); //解析JSON字符串为Godot字典
-                if (json.ContainsKey("Response"))
-                {
-                    var responseDict = json["Response"].AsGodotDictionary();
-                    if (responseDict.ContainsKey("TargetText"))
-                    {
-                        string translatedText = responseDict["TargetText"].ToString();
-                        ShowTranslationResult(translatedText);
-                    }
-                }
-            }
-            else
-            {
-                string errorBody = Encoding.UTF8.GetString(body);
-                GD.PrintErr($"腾讯翻译请求失败，状态码 {responseCode}: {errorBody}");
-            }
-        }
+       else
+       {
+            string errorBody = Encoding.UTF8.GetString(body);
+            GD.PrintErr($"腾讯翻译请求失败，状态码 {responseCode}: {errorBody}");
+       }
+        
     }
-
     private void ShowTranslationResult(string translatedText)
     {
         //翻译文本显示UI上

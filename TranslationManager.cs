@@ -166,4 +166,9 @@ public partial class TranslationManager : Node //翻译管理器(集成)
         SaveManager.Instance.saveData.isBaidutranslationEnable = pressed;
         SaveManager.Instance.SaveDataToFile();
     }
+    public void OnTengxunCheckButtonToggled(bool pressed) //腾讯翻译启用切换
+    {
+        SaveManager.Instance.saveData.isTengxuntranslationEnable = pressed;
+        SaveManager.Instance.SaveDataToFile();
+    }
 }
